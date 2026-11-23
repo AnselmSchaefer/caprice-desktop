@@ -659,12 +659,23 @@ impl PageLayout {
             return Rect::from_min_max(pos2(x, p.y), pos2(x + 1.0, p.y + height));
         }
         let idx = local.clamp(p.start, p.end) - p.start;
-        let r = p.galley.pos_from_cursor(CCursor { index: idx.into(), prefer_next_row }).translate(vec2(p.x, p.y));
+        let cursor = CCursor { index: idx.into(), prefer_next_row };
+        let r = p.galley.pos_from_cursor(cursor).translate(vec2(p.x, p.y));
         if p.cap {
             // The cap's line reaches high above the letter: keep the caret beside it.
             return Rect::from_x_y_ranges(r.x_range(), p.y..=p.y + p.height);
         }
-        r
+        if p.attrs.spacing <= 1.001 {
+            return r;
+        }
+        // Line spacing makes the row taller than its letters, with the room below them (smaller
+        // letters stand lower in the row). The caret is as tall as the letter before it, like what
+        // is typed there; at a row's start, as the letter after it.
+        let at = p.galley.layout_from_cursor(cursor);
+        let glyph = p.galley.rows.get(at.row).and_then(|row| row.row.glyphs.get(at.column.0.saturating_sub(1)));
+        // An empty line has no letter: as tall as the first one will be.
+        let (line, height) = glyph.map_or((r.height(), r.height() / p.attrs.spacing), |g| (g.line_height, g.font_height));
+        Rect::from_min_size(pos2(r.left(), r.bottom() - line), vec2(r.width(), height))
     }
 
     /// Where a dragged picture would land for a pointer at height `y`: the paragraph start nearest
@@ -916,6 +927,112 @@ mod tests {
             let bullet = height(1.0, ListKind::Bullet);
             assert!(bullet.1 > 20.0 && bullet.2, "bullet items are indented and have a marker: {bullet:?}");
             assert!(bullet.0 >= single.0, "narrower text wraps into at least as many rows");
+        });
+    }
+
+    /// The font's line (top to bottom) around the `k`-th char of a row of a piece.
+    fn letter_box(p: &ParaLayout, row: usize, k: usize) -> (f32, f32) {
+        let r = &p.galley.rows[row];
+        let g = &r.row.glyphs[k];
+        let top = p.y + r.pos.y + g.pos.y - g.font_ascent;
+        (top, top + g.font_height)
+    }
+
+    fn within_a_point(caret: Rect, (top, bottom): (f32, f32)) -> bool {
+        (caret.top() - top).abs() <= 1.0 && (caret.bottom() - bottom).abs() <= 1.0
+    }
+
+    /// A document of one paragraph, its chars set at the sizes given.
+    fn doc_of_sizes(text: &str, size: impl Fn(usize) -> f32, spacing: f32) -> Doc {
+        let mut d = doc_with(text, ParaAttrs { spacing, ..Default::default() });
+        for (k, st) in d.flow.styles.iter_mut().enumerate() {
+            st.size = size(k);
+        }
+        d
+    }
+
+    #[test]
+    fn the_caret_is_as_tall_as_the_letters_beside_it_at_any_line_spacing() {
+        with_ctx(|ctx| {
+            for spacing in [1.15f32, 1.35, 1.5, 2.0, 3.0] {
+                let mut d = doc_with(&"word ".repeat(60), ParaAttrs { spacing, ..Default::default() });
+                d.full_paginate(ctx, &Style::new("x"));
+                for sc in [1.0f32, 1.37] {
+                    let l = d.layout_page(ctx, 0, sc, &[]);
+                    let rows = l.rows();
+                    assert!(rows.len() > 2, "the text wraps");
+                    for (k, r) in rows.iter().enumerate() {
+                        // A row's end is the next one's start: `prefer_next_row` says which (R18).
+                        for (at, next) in [(r.start, true), (r.start + 3, true), (r.start + 3, false), (r.end, false)] {
+                            let (caret, letter) = (l.caret_rect(at, next), letter_box(&l.paras[0], k, 0));
+                            assert!(within_a_point(caret, letter), "spacing {spacing}, zoom {sc}, row {k}, char {at}: {caret:?} by {letter:?}");
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn the_caret_fits_small_and_large_letters_on_one_spaced_line() {
+        with_ctx(|ctx| {
+            let mut d = doc_of_sizes("smallLARGEsmall", |k| if (5..10).contains(&k) { 24.0 } else { 11.0 }, 1.5);
+            d.full_paginate(ctx, &Style::new("x"));
+            let l = d.layout_page(ctx, 0, 1.0, &[]);
+            // Where the size changes, the caret is like the letter before it, as what is typed there.
+            for (at, letter) in [(0, 0), (2, 1), (5, 4), (6, 5), (10, 9), (11, 10), (15, 14)] {
+                let (caret, letter) = (l.caret_rect(at, true), letter_box(&l.paras[0], 0, letter));
+                assert!(within_a_point(caret, letter), "char {at}: {caret:?} by {letter:?}");
+            }
+        });
+    }
+
+    #[test]
+    fn the_caret_on_an_empty_spaced_line_is_as_tall_as_once_a_letter_is_typed() {
+        with_ctx(|ctx| {
+            let st = Style::new("x");
+            let font = FontId::new(st.size, family_for(&st.font, false, false).0);
+            let height = ctx.fonts_mut(|f| f.row_height(&font));
+            for text in ["", "x"] {
+                let mut d = doc_with(text, ParaAttrs { spacing: 2.0, ..Default::default() });
+                d.full_paginate(ctx, &st);
+                let caret = d.layout_page(ctx, 0, 1.0, &[]).caret_rect(0, true);
+                assert!(within_a_point(caret, (0.0, height)), "{text:?}: {caret:?}, letters {height} tall");
+            }
+        });
+    }
+
+    #[test]
+    fn at_single_spacing_the_caret_is_as_tall_as_its_row() {
+        with_ctx(|ctx| {
+            let mut d = doc_of_sizes("smallLARGEsmall", |k| if (5..10).contains(&k) { 24.0 } else { 11.0 }, 1.0);
+            d.full_paginate(ctx, &Style::new("x"));
+            for sc in [1.0f32, 1.37] {
+                let l = d.layout_page(ctx, 0, sc, &[]);
+                let r = l.rows()[0];
+                for at in 0..=15 {
+                    let caret = l.caret_rect(at, true);
+                    assert_eq!((caret.top(), caret.bottom()), (r.top, r.top + r.height), "char {at} at zoom {sc}");
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn the_caret_by_a_picture_is_as_tall_as_the_picture_whatever_the_line_spacing() {
+        with_ctx(|ctx| {
+            for spacing in [1.0f32, 2.0] {
+                let mut d = doc_with(&IMAGE_CHAR.to_string(), ParaAttrs { spacing, ..Default::default() });
+                let picture = crate::model::ImageData { id: 1, format: "png".into(), bytes: vec![], px: (200, 100), width_pt: 200.0, rotation: 0 };
+                d.images.push(picture);
+                d.flow.styles[0].image = 1;
+                d.full_paginate(ctx, &Style::new("x"));
+                let l = d.layout_page(ctx, 0, 1.0, &[]);
+                for at in [0, 1] {
+                    let caret = l.caret_rect(at, true);
+                    assert_eq!((caret.top(), caret.bottom()), (0.0, 100.0), "spacing {spacing}, char {at}");
+                }
+            }
         });
     }
 

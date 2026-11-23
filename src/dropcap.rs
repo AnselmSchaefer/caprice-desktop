@@ -500,6 +500,33 @@ for anything else.";
     }
 
     #[test]
+    fn the_lines_beside_a_drop_cap_have_a_caret_as_tall_as_their_letters() {
+        with_ctx(|ctx| {
+            let mut d = doc(&[("One", title()), (STORY, ParaAttrs { spacing: 1.5, ..body() })], 3);
+            d.full_paginate(ctx, &Style::new("x"));
+            for sc in [1.0f32, 1.37] {
+                let l = d.layout_page(ctx, 0, sc, &[]);
+                let (cap, beside) = (&l.paras[1], &l.paras[2]);
+                assert!(cap.cap && beside.beside && beside.galley.rows.len() == 3);
+                let mut at = beside.start;
+                for row in &beside.galley.rows {
+                    let g = &row.row.glyphs[0];
+                    let top = beside.y + row.pos.y + g.pos.y - g.font_ascent;
+                    // The first place is just after the cap: on the line beside it, not on the cap.
+                    for at in [at, at + 3] {
+                        let caret = l.caret_rect(at, true);
+                        let fits = (caret.top() - top).abs() <= 1.0 && (caret.bottom() - top - g.font_height).abs() <= 1.0;
+                        assert!(fits, "zoom {sc}, char {at}: {caret:?} by letters from {top}, {} tall", g.font_height);
+                    }
+                    at += usize::from(row.row.char_count_excluding_newline());
+                }
+                let on_cap = l.caret_rect(cap.start, false);
+                assert_eq!((on_cap.top(), on_cap.bottom()), (cap.y, cap.y + cap.height), "on the cap, all of its height");
+            }
+        });
+    }
+
+    #[test]
     fn a_chapter_fills_the_page_the_same_at_every_zoom() {
         with_ctx(|ctx| {
             let paras: Vec<(&str, ParaAttrs)> = (0..8).flat_map(|_| [("One", title()), (STORY, body()), (STORY, body())]).collect();
