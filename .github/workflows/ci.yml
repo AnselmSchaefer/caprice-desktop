@@ -1,0 +1,54 @@
+# Tests every push to main and every pull request: builds, runs the tests and clippy. Nothing here deploys,
+# and it has no secrets and only read access.
+# A pull request runs its own copy of this file, so a change to it must be read by a person before merging.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  # As in "Done means" of CLAUDE.md. Tighten when the numbers improve.
+  MIN_PASSED: 297
+  MAX_IGNORED: 6
+  MAX_CLIPPY: 15
+
+jobs:
+  check:
+    name: Tests and clippy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component clippy
+          rustup default 1.99.1
+      - name: The fonts the tests measure pages with
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-liberation
+      - name: Tests
+        run: |
+          set -o pipefail
+          cargo test --locked 2>&1 | tee test.log
+          read -r passed ignored < <(awk '/^test result:/ {p+=$4; i+=$8} END {print p+0, i+0}' test.log)
+          echo "$passed passed (at least $MIN_PASSED), $ignored ignored (at most $MAX_IGNORED)"
+          [ "$passed" -ge "$MIN_PASSED" ] && [ "$ignored" -le "$MAX_IGNORED" ]
+      - name: Clippy, with no warnings beyond those already there
+        run: |
+          set -o pipefail
+          n=$(cargo clippy --locked --all-targets --message-format=json \
+            | jq -r 'select(.reason=="compiler-message") | .message | select(.level=="warning") | .code.code as $c | [.spans[]? | select(.is_primary)][0] | "\($c) \(.file_name):\(.line_start):\(.column_start)"' \
+            | sort -u | tee warnings.txt | wc -l)
+          echo "clippy: $n warnings, $MAX_CLIPPY allowed"
+          [ "$n" -le "$MAX_CLIPPY" ] || { cat warnings.txt; exit 1; }
