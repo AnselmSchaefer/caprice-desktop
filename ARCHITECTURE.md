@@ -345,6 +345,7 @@ a `TOC` field (Caprice's page numbers are only its cached result, and Word updat
 |---|---|---|
 | Zoomed line heights rounded to pixels | Rescale rows to page-size height × zoom, per line | `layout.rs::true_to_scale` |
 | Text background fills the whole line height | Trim background quads to the font height | `layout.rs::tight_highlights` |
+| A cursor's rect is the whole line height, with the room of line spacing below the letters | Above spacing 1 the caret is as tall as the letter before it (`font_height`); egui's bottom `valign` puts that letter's own `line_height` at the row's bottom. `the_caret_is_as_tall_as_the_letters_beside_it_at_any_line_spacing`, `the_caret_fits_small_and_large_letters_on_one_spaced_line`, `the_caret_on_an_empty_spaced_line_is_as_tall_as_once_a_letter_is_typed`, `the_caret_drawn_on_spaced_lines_is_as_tall_as_the_letters` | `layout.rs::caret_rect` |
 | No text flowing around a box | Drop cap paragraph as three pieces; text boxes lie in front of the text | `dropcap.rs`, `textbox.rs` |
 | Only convex shapes are filled | Fleurons and circles built of convex pieces (`leaf`, `circle`); the emblem's tile a fan of triangles, its pencil quads | `bands.rs`, `emblem.rs` |
 | A field's galley is shown from its left, whatever its alignment | Box text laid out left, rows moved within the width (`box_galley`) | `textbox.rs` |
@@ -645,8 +646,14 @@ this one.
   caret shows at the start of the next made Down stay put and Up skip a line.
 - Something new that moves the caret line by line, or to a line's ends, sets `prefer_next` for
   where it means the caret to be.
+- **The caret's height is not its line's:** above spacing 1 it is that of the letter beside it
+  (R11), the lines beside a drop cap included; at spacing 1 the row's. On a drop cap, and before or
+  after a picture, it keeps their height. Take a line's height from `row_of`, not `caret_rect`.
 - Tests: `up_and_down_from_the_start_of_a_wrapped_line_move_one_line`,
-  `arrow_keys_treat_a_drop_cap_and_the_line_beside_it_as_one_line`.
+  `arrow_keys_treat_a_drop_cap_and_the_line_beside_it_as_one_line`,
+  `at_single_spacing_the_caret_is_as_tall_as_its_row`,
+  `the_lines_beside_a_drop_cap_have_a_caret_as_tall_as_their_letters`,
+  `the_caret_by_a_picture_is_as_tall_as_the_picture_whatever_the_line_spacing`.
 
 ### R19 — Review and What next: the button names what is read; findings are found again by their words
 

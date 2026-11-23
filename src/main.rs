@@ -4719,6 +4719,37 @@ mod tests {
     }
 
     #[test]
+    fn the_caret_drawn_on_spaced_lines_is_as_tall_as_the_letters() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("Rain all day.");
+        let ctx = h.ctx.clone();
+        // The Journal's spacing, in the usual font: only one test may load the Journal's (R11).
+        for spacing in [start::Kind::Journal.body("").para.spacing, 1.5] {
+            h.app.set_para(&ctx, |p| p.spacing = spacing);
+            // Set again where it is, the caret is at the start of its blink.
+            let end = h.app.caret;
+            h.app.set_caret(&ctx, end, false);
+            h.frames(2, vec![], Modifiers::NONE);
+            let (top, bottom, right) = h.painted.iter().find_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) if t.galley.job.text == "Rain all day." => {
+                    let row = &t.galley.rows[0];
+                    let g = row.row.glyphs.last()?;
+                    let top = t.pos.y + row.pos.y + g.pos.y - g.font_ascent;
+                    Some((top, top + g.font_height, t.pos.x + row.pos.x + g.max_x()))
+                }
+                _ => None,
+            }).expect("the words are drawn");
+            let caret = h.painted.iter().find_map(|cs| match &cs.shape {
+                egui::Shape::LineSegment { points: [a, b], stroke } if stroke.color == theme::INK && a.x == b.x && (a.x - right).abs() < 2.0 => Some((a.y, b.y)),
+                _ => None,
+            }).expect("the caret is drawn after them");
+            let fits = (caret.0 - top).abs() <= 1.0 && (caret.1 - bottom).abs() <= 1.0;
+            assert!(fits, "spacing {spacing}: the caret from {} to {}, the letters from {top} to {bottom}", caret.0, caret.1);
+        }
+    }
+
+    #[test]
     fn escape_on_the_welcome_page_begins_a_blank_story() {
         let dir = test_dir("start-escape");
         let mut h = started_without_a_file(&dir);
