@@ -86,6 +86,12 @@ impl Theme {
         Theme::Sea,
     ];
 
+    /// Whether the theme hides something for the writer to find (`eggs.rs`); the gallery shows these
+    /// apart from the classic ones.
+    pub fn is_magic(self) -> bool {
+        matches!(self, Theme::Garden | Theme::City | Theme::Sea)
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Theme::Midnight => "Midnight Ink",

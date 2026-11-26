@@ -5512,6 +5512,49 @@ mod tests {
     }
 
     #[test]
+    fn the_theme_gallery_opens_on_the_group_of_the_theme_in_use_and_switches_between_classic_and_magic() {
+        let classic = ["Midnight Ink", "Lagoon", "Marmalade", "Disco Grape", "Bubblegum", "Pistachio Sorbet", "Typewriter"];
+        let magic = ["Magic Garden", "Magic City", "Magic Sea"];
+        let shows = |h: &mut Harness, names: &[&str], hidden: &[&str]| {
+            for name in names {
+                assert!(h.widget_rect(name).is_some(), "{name} is shown");
+            }
+            for name in hidden {
+                assert!(h.widget_rect(name).is_none(), "{name} is not shown");
+            }
+        };
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        h.click_widget("Page");
+        h.click_widget("Midnight Ink ⏵");
+        shows(&mut h, &classic, &magic);
+        h.click_widget("Magic");
+        shows(&mut h, &magic, &classic);
+        h.click_widget("Classic");
+        shows(&mut h, &classic, &magic);
+        h.click_widget("Magic");
+        h.click_widget("Magic City");
+        h.wait(1.0);
+        assert_eq!(h.app.themes.theme, theme::Theme::City, "a magic theme is picked as a classic one is");
+        assert_eq!(theme::pal(), theme::Theme::City.palette());
+        shows(&mut h, &magic, &classic);
+
+        // Opened again, the gallery starts on the group of the theme in use.
+        h.click_widget("Classic");
+        h.key(Key::Escape, Modifiers::NONE);
+        h.frames(3, vec![], Modifiers::NONE);
+        assert!(h.widget_rect("Magic City ⏵").is_none(), "the menu closed");
+        h.click_widget("Page");
+        h.click_widget("Magic City ⏵");
+        shows(&mut h, &magic, &classic);
+        h.click_widget("Classic");
+        h.click_widget("Typewriter");
+        h.wait(1.0);
+        assert_eq!(h.app.themes.theme, theme::Theme::Typewriter);
+        shows(&mut h, &classic, &magic);
+    }
+
+    #[test]
     fn the_docks_stay_readable_in_every_theme() {
         let mut h = Harness::new();
         for t in theme::Theme::ALL {
