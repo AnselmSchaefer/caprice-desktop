@@ -187,10 +187,24 @@ fn color_dropdown(ui: &mut egui::Ui, color: Option<[u8; 3]>) -> Option<Option<[u
 }
 
 /// The themes, each drawn as a little desk with its dock, a page and the accent; the one clicked
-/// becomes `theme`.
+/// becomes `theme`. A switch at the top shows the classic themes or the magic ones. Each time the
+/// gallery opens it starts on the group the theme in use is in: the group shown is kept in egui's
+/// memory with the frame it was last drawn in, and a gap means the gallery was closed.
 fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme) {
+    let key = Id::new("theme_gallery_group");
+    let now = ui.ctx().cumulative_frame_nr();
+    let mut magic = match ui.data(|d| d.get_temp::<(bool, u64)>(key)) {
+        Some((magic, drawn)) if drawn + 1 >= now => magic,
+        _ => theme.is_magic(),
+    };
+    ui.horizontal(|ui| {
+        ui.selectable_value(&mut magic, false, "Classic").on_hover_text("Colours for the desk and docks");
+        ui.selectable_value(&mut magic, true, "Magic").on_hover_text("A little magic on the desk");
+    });
+    ui.data_mut(|d| d.insert_temp(key, (magic, now)));
+    ui.add_space(4.0);
     egui::Grid::new("theme_gallery").num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
-        for (k, t) in Theme::ALL.into_iter().enumerate() {
+        for (k, t) in Theme::ALL.into_iter().filter(|t| t.is_magic() == magic).enumerate() {
             ui.vertical(|ui| {
                 ui.label(egui::RichText::new(t.name()).size(12.0).color(pal().text_dim));
                 let (rect, resp) = ui.allocate_exact_size(vec2(150.0, 84.0), Sense::click());

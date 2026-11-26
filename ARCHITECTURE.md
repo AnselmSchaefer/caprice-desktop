@@ -4,7 +4,7 @@ How Caprice is put together, and the rules that hold it together. The rules (§4
 read before changing anything: each says what depends on what, what to check when touching it, and
 which tests guard it. Keep this file true: a change that alters a rule updates it in the same commit.
 
-*Last brought up to date: 2026-10-23 (themes for the desk and docks).*
+*Last brought up to date: 2026-11-26 (the theme gallery's Classic and Magic groups).*
 
 ---
 
@@ -1034,10 +1034,17 @@ same in every theme, so what is printed (R20) and exported (R10) never depends o
   widgets switch halfway).
 - **Light themes must stay readable**: `text` on `dock` at 4.5:1, `text_dim` at 3:1. A new theme
   goes into `Theme::ALL`, so the gallery and the test cover it.
+- **The gallery shows the classic themes or the magic ones**, by a `Classic` / `Magic` switch at
+  its top; `Theme::is_magic` decides the group, so a new magic theme must be named there too, or it
+  lands among the classic ones. Each time the gallery opens it starts on the group of the theme in
+  use: the group shown is kept in egui's memory with the frame it was drawn in, and a frame without
+  it means the gallery was closed. Switching only changes the tiles; the submenu stays open. The
+  groups are the gallery's alone: `Theme` and `theme.json` are the same as before.
 - The choice is kept in the data folder (`theme.json`), not in the story; `Harness` keeps it
   nowhere (`Themes::kept_in(None)`).
 - Tests: `a_theme_picked_in_the_page_menu_washes_over_the_desk_and_is_kept_for_next_time`,
-  `the_docks_stay_readable_in_every_theme`.
+  `the_docks_stay_readable_in_every_theme`,
+  `the_theme_gallery_opens_on_the_group_of_the_theme_in_use_and_switches_between_classic_and_magic`.
 
 ### R30 — Hidden gems: on the desk, or over the page on the screen only; never moving anything
 
@@ -1244,7 +1251,8 @@ only (R13, R17), check it in `Backdrop::asked` in a test.
 branch of `frame`, behind the paper or in front of it as it should hide or not; end it when the
 page turns; leave it out of print (R20 is for what is on the page) (R28).
 
-**A new theme:** a `Theme` variant in `ALL`, its `name`, `about` and `palette`; run
+**A new theme:** a `Theme` variant in `ALL`, its `name`, `about` and `palette`, and in
+`is_magic` if it is a magic one; run
 `the_docks_stay_readable_in_every_theme` (R29). **Something new drawn around the page:** its colours
 from `theme::pal()` (R29).
 
