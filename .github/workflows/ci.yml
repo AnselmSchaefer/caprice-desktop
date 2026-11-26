@@ -18,7 +18,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: never
   # As in "Done means" of CLAUDE.md. Tighten when the numbers improve.
-  MIN_PASSED: 305
+  MIN_PASSED: 321
   MAX_IGNORED: 6
   MAX_CLIPPY: 15
 
