@@ -6078,6 +6078,9 @@ mod tests {
         let path = dir.join("story.caprice");
         h.type_text("Once");
         h.app.save_to(path.clone());
+        // The clock is well on before the change, so the delay must count from the change, not from the start.
+        h.wait(versions::SAVE_AFTER + 1.0);
+        assert!(!h.app.unsaved());
         h.type_text(" more");
         // The change is seen at the next look, and the delay counts from then.
         h.wait(6.0);
