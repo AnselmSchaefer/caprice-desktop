@@ -89,6 +89,6 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
 
 ## Files
 
-- Tracked: `README.md`, `ARCHITECTURE.md`, `CLAUDE.md`.
+- Tracked: `README.md`, `ARCHITECTURE.md`, `AGENTS.md`.
 - Local, untracked planning notes: `TECHNICAL_DESCRIPTION.md` (older, superseded by
   `ARCHITECTURE.md`), `FORK_REQUIREMENTS.md` (when to fork egui), `CHAPTERS_PLAN.md`.
