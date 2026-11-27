@@ -2049,9 +2049,40 @@ mod tests {
         // Pinching further out does not go below it either.
         h.frames(1, vec![egui::Event::Zoom(0.5)], Modifiers::NONE);
         assert!((h.app.zoom - floor).abs() < 1e-4, "a pinch stops there too: {}", h.app.zoom);
-        // Zooming in still goes up to the most.
+        // Zooming in stops at the fitting size on the way through, then goes up to the most.
+        h.frames(1, vec![egui::Event::Zoom(100.0)], Modifiers::NONE);
+        assert_eq!(h.app.zoom, fit, "passing the fit stops there");
         h.frames(1, vec![egui::Event::Zoom(100.0)], Modifiers::NONE);
         assert_eq!(h.app.zoom, view::MAX_ZOOM);
+    }
+
+    #[test]
+    fn a_slow_pinch_leaves_the_fitting_zoom_and_stops_at_it_on_the_way_back() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        let fit = fitting_zoom(&mut h);
+        let floor = (fit * 0.5).max(view::MIN_ZOOM);
+        let pinch = |h: &mut Harness, z: f32| h.frames(1, vec![egui::Event::Zoom(z)], Modifiers::NONE);
+        // Each frame of a slow pinch moves the zoom by less than a hundredth: it still leaves the fit.
+        pinch(&mut h, 0.99);
+        assert!(h.app.zoom < fit && !h.app.fit, "one small step out leaves the fit: {} vs {fit}", h.app.zoom);
+        for _ in 0..200 {
+            pinch(&mut h, 0.99);
+        }
+        assert!((h.app.zoom - floor).abs() < 1e-4, "a slow pinch goes down to the floor and stops: {} vs {floor}", h.app.zoom);
+        // Pinching slowly back in stops at the fitting size on the way through.
+        let mut stopped = false;
+        for _ in 0..200 {
+            pinch(&mut h, 1.01);
+            if h.app.zoom >= fit {
+                stopped = h.app.zoom == fit;
+                break;
+            }
+        }
+        assert!(stopped, "crossing back stops exactly at the fit: {} vs {fit}", h.app.zoom);
+        // And from there the next small step goes on in.
+        pinch(&mut h, 1.01);
+        assert!(h.app.zoom > fit, "the fit does not hold a slow pinch: {} vs {fit}", h.app.zoom);
     }
 
     #[test]

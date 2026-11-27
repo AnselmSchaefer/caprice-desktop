@@ -1242,8 +1242,16 @@ then "+", the zoom, Fit and the Scratchpad as an icon (`ui::pad_button`, named "
 The fitting zoom (`fit` in `App::page_rect`) is worked out every frame from `view_area` (R31) and
 the page size. Zooming out (pinch, Ctrl+scroll, Ctrl/Cmd + `-`) stops at the floor
 `(fit * 0.5).max(MIN_ZOOM)`: smaller, the page is only a stamp in the window. Zooming in stops at
-`MAX_ZOOM`, and on the way through a zoom stops at the fitting size, as before.
+`MAX_ZOOM`.
 
+- **The fit stops a zoom passing through it, but never holds one starting there.** A zoom snaps to
+  `fit` only when it crosses it (from below to above or back) or lands within `1e-3` of it, and
+  only if it did not start at `fit`. Every story opens fitted, and a slow pinch or smooth
+  Ctrl+scroll moves the zoom by less than a hundredth per frame: snapping whenever the new zoom
+  was near the fit held it there and no zooming was possible at all. A single big step through
+  the fit (Ctrl+=, a fast pinch) stops at it; the next one goes on. Guarded by
+  `a_slow_pinch_leaves_the_fitting_zoom_and_stops_at_it_on_the_way_back` and
+  `zooming_out_stops_at_half_the_fitting_zoom`.
 - **The floor follows the window.** It is worked out before any zooming in the frame, so when the
   window grows (or the page bar docks and the room changes) while the writer is zoomed out below
   the new floor, the zoom is lifted up to it around the view's centre, like a Ctrl+- in reverse.

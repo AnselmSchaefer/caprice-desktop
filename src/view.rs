@@ -153,8 +153,12 @@ impl App {
         if (z - 1.0).abs() > 1e-4 {
             let anchor = hover.filter(|p| view.contains(*p)).unwrap_or(view.center());
             let mut new = (self.zoom * z).clamp(floor, MAX_ZOOM);
-            if (new - fit).abs() < 0.02 {
-                new = fit; // stop at the fitting size on the way through
+            // Stop at the fitting size on the way through it, but never hold the zoom there: a slow pinch
+            // moves less than a hair per frame, and starting at the fit (as every story opens) it must
+            // still be able to leave. Landing within a hair of the fit counts as reaching it.
+            let crossed = (self.zoom < fit) != (new < fit) || (new - fit).abs() < 1e-3;
+            if self.zoom != fit && crossed {
+                new = fit;
             }
             self.origin = anchor + (self.origin - anchor) * (new / self.zoom);
             self.zoom = new;
