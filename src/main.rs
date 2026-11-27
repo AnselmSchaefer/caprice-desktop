@@ -19,6 +19,7 @@ mod leave;
 mod model;
 mod notes;
 mod numbers;
+mod pagebar;
 mod paginate;
 mod peek;
 mod print;
@@ -157,8 +158,8 @@ pub struct App {
     pub note_focus: Option<u64>,
     pub pads: HashMap<u64, notes::Pad>,
     pub last_page_rect: Rect,
-    /// Where the scrollbar's track was drawn last, and the stretch its thumb's centre travels.
-    pub last_track: (f32, f32, f32),
+    /// Where the scrollbar's thumb was last drawn with its centre on the first page, and on the last.
+    pub last_track: (Pos2, Pos2),
     /// Textures of the document's pictures, by picture id.
     pub textures: HashMap<u32, egui::TextureHandle>,
     pub startup_file: Option<PathBuf>,
@@ -188,6 +189,8 @@ pub struct App {
     pub story_notes_open: bool,
     /// The scratchpad shows, on the right.
     pub scratchpad_open: bool,
+    /// How often the scratchpad's window was put back where it starts: a part of its id.
+    pub scratchpad_placed: u32,
     /// The review and the ideas for what comes next, on the left.
     pub review: review::Review,
     pub ideas: ideas::Ideas,
@@ -230,6 +233,8 @@ pub struct App {
     pub peeks: peek::Peeks,
     /// The colours around the pages, and where the choice is kept.
     pub themes: theme::Themes,
+    /// Which edge of the window the page bar is docked to, and where the choice is kept.
+    pub bar: pagebar::PageBar,
     /// What grows and flies in the Magic Garden theme, and what builds in the Magic City.
     pub eggs: eggs::Eggs,
 }
@@ -280,7 +285,7 @@ impl App {
             pads: HashMap::new(),
             last_page_rect: Rect::NOTHING,
             clip: None,
-            last_track: (0.0, 0.0, 0.0),
+            last_track: (Pos2::ZERO, Pos2::ZERO),
             textures: HashMap::new(),
             startup_file: None,
             shown_status: String::new(),
@@ -298,6 +303,7 @@ impl App {
             answer: None,
             story_notes_open: false,
             scratchpad_open: false,
+            scratchpad_placed: 0,
             review: review::Review::default(),
             ideas: ideas::Ideas::default(),
             backdrop: backdrop::Backdrop::default(),
@@ -319,6 +325,7 @@ impl App {
             start: start::Start::new(),
             peeks: peek::Peeks::default(),
             themes: theme::Themes::new(),
+            bar: pagebar::PageBar::new(),
             eggs: eggs::Eggs::default(),
         };
         app.saved_hash = app.content_hash();
@@ -353,7 +360,11 @@ impl App {
             let fade = (((SHOW_FOR - age) / 0.6) as f32).clamp(0.0, 1.0);
             let galley = ui.painter().layout_no_wrap(text, egui::FontId::proportional(13.0), theme::pal().text.gamma_multiply(fade));
             let size = galley.size() + egui::vec2(28.0, 14.0);
-            let center = egui::pos2(area.center().x, area.bottom() - ui::DOCK_GAP - ui::DOCK_H - 26.0);
+            // Above the page bar lying at the bottom, or at the bottom beside it standing; under
+            // the pages either way.
+            let above = if self.bar.side.vertical() { size.y / 2.0 } else { ui::DOCK_H + 26.0 };
+            let y = area.bottom() - ui::DOCK_GAP - above;
+            let center = egui::pos2(self.view_area(area).center().x, y);
             let pill = Rect::from_center_size(center, size);
             ui.painter().rect_filled(pill, 12.0, theme::pal().dock.gamma_multiply(fade));
             ui.painter().rect_stroke(pill, 12.0, egui::Stroke::new(1.0, theme::pal().dock_edge.gamma_multiply(fade)), egui::StrokeKind::Inside);
@@ -722,6 +733,7 @@ mod tests {
             app.start.recent.clear();
             app.words.progress = Default::default();
             app.themes = theme::Themes::kept_in(None);
+            app.bar = pagebar::PageBar::kept_in(None);
             Self { ctx, app, time: 0.0, mods: Modifiers::NONE, access: None, painted: Vec::new(), width: 1240.0 }
         }
 
@@ -1193,8 +1205,8 @@ mod tests {
 
         // Dragging the thumb right slides the pages half out one by one, following it. The page
         // and the caret stay put meanwhile.
-        let (y, x0, x1) = h.app.last_track;
-        let at = |page: f32| egui::pos2(x0 + (x1 - x0) * page / 6.0, y);
+        let (first, last) = h.app.last_track;
+        let at = |page: f32| first + (last - first) * page / 6.0;
         let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
         let near = |a: f32, b: f32| (a - b).abs() < 0.01;
         h.frames(1, vec![egui::Event::PointerMoved(at(1.0)), button(at(1.0), true)], Modifiers::NONE);
@@ -1255,8 +1267,8 @@ mod tests {
         assert_eq!(h.app.pos, 1.0);
 
         // The pages turn with the thumb, nothing is held out, and the caret goes along.
-        let (y, x0, x1) = h.app.last_track;
-        let at = |page: f32| egui::pos2(x0 + (x1 - x0) * page / 6.0, y);
+        let (first, last) = h.app.last_track;
+        let at = |page: f32| first + (last - first) * page / 6.0;
         let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
         h.frames(1, vec![egui::Event::PointerMoved(at(1.0)), button(at(1.0), true)], Modifiers::NONE);
         h.frames(1, vec![egui::Event::PointerMoved(at(3.4))], Modifiers::NONE);
@@ -1741,6 +1753,134 @@ mod tests {
         }
     }
 
+    impl Harness {
+        /// Take the page bar by its grip, drag it to `to` and let go there.
+        fn drag_grip_to(&mut self, to: Pos2) {
+            let grip = self.widget_rect(pagebar::GRIP_NAME).expect("the page bar has a grip").center();
+            self.press_at(grip, true);
+            for k in 1..=8 {
+                self.frames(1, vec![egui::Event::PointerMoved(grip + (to - grip) * k as f32 / 8.0)], Modifiers::NONE);
+            }
+            self.press_at(to, false);
+            self.frames(30, vec![], Modifiers::NONE);
+        }
+
+        /// Where the page bar's dock is now.
+        fn bar_rect(&self) -> Rect {
+            self.app.page_bar_rect(Rect::from_min_size(Pos2::ZERO, egui::vec2(self.width, 900.0)))
+        }
+    }
+
+    #[test]
+    fn the_page_bar_docks_on_the_side_its_grip_is_let_go_at_and_the_pages_keep_clear_of_it() {
+        let mut h = Harness::new();
+        pages_of_text(&mut h);
+        assert_eq!(h.app.bar.side, pagebar::Side::Bottom, "along the bottom at first");
+        assert!(h.widget_rect("+ New page").is_some());
+
+        // Let go in the left quarter: the bar stands down the left, its tools made to fit.
+        h.drag_grip_to(egui::pos2(200.0, 450.0));
+        assert_eq!(h.app.bar.side, pagebar::Side::Left);
+        let bar = h.bar_rect();
+        assert!(bar.height() > bar.width() && bar.left() < 30.0, "{bar:?}");
+        assert!(h.widget_rect("+ New page").is_none(), "New page is only \"+\"");
+        let mut seen: Vec<(&str, Rect)> = Vec::new();
+        for name in ["+", "Fit", "Scratchpad", pagebar::GRIP_NAME] {
+            let at = h.widget_rect(name).unwrap_or_else(|| panic!("{name} is in the bar"));
+            assert!(bar.contains_rect(at), "{name} {at:?} is outside the bar {bar:?}");
+            assert!(seen.iter().all(|(_, b)| !b.intersects(at)), "{name} {at:?} is over one of {seen:?}");
+            seen.push((name, at));
+        }
+        assert!(h.app.last_page_rect.left() > bar.right() + 8.0, "the page {:?} is clear of the bar", h.app.last_page_rect);
+        // The Scratchpad's icon still opens it, and the ideas open clear of the bar too.
+        h.click_widget("Scratchpad");
+        assert!(h.app.scratchpad_open);
+        h.click_widget("Scratchpad");
+        assert!(!h.app.scratchpad_open);
+        assert!(crate::review::left_dock(&h.ctx, true, h.app.bar.side).left() > bar.right());
+
+        // A message shows beside the bar, not over it.
+        h.app.status = "- saved".into();
+        h.frames(2, vec![], Modifiers::NONE);
+        let said = h.painted.iter().find_map(|cs| match &cs.shape {
+            egui::Shape::Text(t) if t.galley.job.text == "saved" => Some(t.visual_bounding_rect()),
+            _ => None,
+        });
+        assert!(said.expect("the message shows").left() > bar.right(), "{said:?}");
+
+        // In the right quarter it stands down the right, and the scratchpad opens beside it.
+        h.drag_grip_to(egui::pos2(1100.0, 300.0));
+        assert_eq!(h.app.bar.side, pagebar::Side::Right);
+        let bar = h.bar_rect();
+        assert!(bar.right() > h.width - 30.0 && bar.height() > bar.width(), "{bar:?}");
+        assert!(h.app.last_page_rect.right() < bar.left() - 8.0, "the page {:?} is clear of the bar", h.app.last_page_rect);
+        h.click_widget("Scratchpad");
+        let pad = h.ctx.memory(|m| m.area_rect(h.app.scratchpad_id())).expect("the scratchpad is open");
+        assert!(pad.right() < bar.left(), "the scratchpad {pad:?} opens clear of the bar {bar:?}");
+        h.click_widget("Scratchpad");
+
+        // Let go in the middle half, it lies along the bottom again, as it was.
+        h.drag_grip_to(egui::pos2(500.0, 400.0));
+        assert_eq!(h.app.bar.side, pagebar::Side::Bottom);
+        assert_eq!(h.bar_rect(), App::dock_rect(Rect::from_min_size(Pos2::ZERO, egui::vec2(h.width, 900.0)), false));
+        assert!(h.widget_rect("+ New page").is_some() && h.widget_rect("Scratchpad").is_some());
+        assert!(h.app.last_page_rect.bottom() < h.bar_rect().top());
+    }
+
+    #[test]
+    fn standing_down_a_side_the_page_bar_turns_the_pages_with_its_thumb() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        for _ in 0..6 {
+            h.type_text("page");
+            h.key(Key::Enter, Modifiers::COMMAND);
+        }
+        h.frames(120, vec![], Modifiers::NONE);
+        h.drag_grip_to(egui::pos2(1150.0, 450.0));
+        let ctx = h.ctx.clone();
+        h.app.go_to_page(&ctx, 1);
+        h.frames(150, vec![], Modifiers::NONE);
+        assert_eq!(h.app.pos, 1.0);
+
+        // The track runs from top to bottom: the first page at the top.
+        let (first, last) = h.app.last_track;
+        assert!(first.x == last.x && last.y - first.y > 300.0, "{first:?} to {last:?}");
+        assert!(h.bar_rect().contains(first) && h.bar_rect().contains(last));
+        let at = |page: f32| first + (last - first) * page / 6.0;
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        h.frames(1, vec![egui::Event::PointerMoved(at(1.0)), button(at(1.0), true)], Modifiers::NONE);
+        h.frames(1, vec![egui::Event::PointerMoved(at(3.4))], Modifiers::NONE);
+        h.frames(10, vec![], Modifiers::NONE);
+        assert!((h.app.pos - 3.4).abs() < 0.01, "{}", h.app.pos);
+        h.frames(1, vec![button(at(3.4), false)], Modifiers::NONE);
+        h.frames(60, vec![], Modifiers::NONE);
+        assert_eq!((h.app.pos, h.app.target), (3.0, 3));
+        // New page works from there too.
+        h.click_widget("+");
+        h.frames(120, vec![], Modifiers::NONE);
+        assert_eq!((h.app.doc.pages(), h.app.target), (8, 4));
+    }
+
+    #[test]
+    fn the_side_the_page_bar_is_docked_to_is_kept_for_next_time() {
+        let dir = std::env::temp_dir().join(format!("caprice-page-bar-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut h = Harness::new();
+        h.app.bar = pagebar::PageBar::kept_in(Some(dir.join("page_bar.json")));
+        h.frames(3, vec![], Modifiers::NONE);
+        h.drag_grip_to(egui::pos2(100.0, 500.0));
+        assert_eq!(std::fs::read_to_string(dir.join("page_bar.json")).unwrap(), "\"left\"");
+
+        let mut again = Harness::new();
+        again.app.bar = pagebar::PageBar::kept_in(Some(dir.join("page_bar.json")));
+        again.frames(3, vec![], Modifiers::NONE);
+        assert_eq!(again.app.bar.side, pagebar::Side::Left, "the next time Caprice opens");
+        assert!(again.widget_rect(pagebar::GRIP_NAME).is_some_and(|g| g.right() < 80.0));
+        again.drag_grip_to(egui::pos2(600.0, 500.0));
+        assert_eq!(std::fs::read_to_string(dir.join("page_bar.json")).unwrap(), "\"bottom\"");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_note_on_a_line_stays_put_while_typing_next_to_it() {
         let mut h = Harness::new();
@@ -1947,8 +2087,8 @@ mod tests {
 
         /// Drag the scrollbar's thumb to page `to` of `of` and let go.
         fn scrub_to(&mut self, to: usize, of: usize) {
-            let (y, x0, x1) = self.app.last_track;
-            let at = |page: usize| egui::pos2(x0 + (x1 - x0) * page as f32 / (of - 1) as f32, y);
+            let (first, last) = self.app.last_track;
+            let at = |page: usize| first + (last - first) * page as f32 / (of - 1) as f32;
             let from = at(self.app.target);
             let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
             self.frames(1, vec![egui::Event::PointerMoved(from), button(from, true)], Modifiers::NONE);

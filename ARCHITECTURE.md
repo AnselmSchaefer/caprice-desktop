@@ -4,7 +4,7 @@ How Caprice is put together, and the rules that hold it together. The rules (§4
 read before changing anything: each says what depends on what, what to check when touching it, and
 which tests guard it. Keep this file true: a change that alters a rule updates it in the same commit.
 
-*Last brought up to date: 2026-11-26 (the theme gallery's Classic and Magic groups).*
+*Last brought up to date: 2026-11-27 (the page bar docks at the left, the bottom or the right).*
 
 ---
 
@@ -74,7 +74,8 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `images.rs` | Pictures: inserting, resizing, rotating, moving, textures |
 | `search.rs` | Find and replace bar, matches (case, whole words) |
 | `words.rs` | The Document info window: dates, file, counts (words, chapter, selection…), today's words and the daily goal, kept in the data folder |
-| `ui.rs` | Top toolbar (formatting, Page and Insert menus, the text box gallery), bottom page bar and scrollbar |
+| `ui.rs` | Top toolbar (formatting, Page and Insert menus, the text box gallery), the page bar lying at the bottom, the scrollbar's track |
+| `pagebar.rs` | Where the page bar is docked (`Side`, kept in `page_bar.json`), its grip, the bar standing down a side |
 | `bands.rs` | Headers and footers: their looks drawn as `Ink`, fields filled in per page, the gallery tiles, accent colours |
 | `numbers.rs` | Page numbering: changes pinned to a char (start again, count on, none; figures or roman), the number of each page, setting one from a page |
 | `textbox.rs` | Text boxes: drawn as `Ink`, inserted, written in, moved, resized, pinned to a char, in front of the text or behind it; their selection |
@@ -357,6 +358,7 @@ a `TOC` field (Caprice's page numbers are only its cached result, and Word updat
 | `ctx.fonts_mut` inside `ctx.fonts_mut` hangs (the context's lock is taken twice) | Build a job (`paragraph_job`, `run_format`, which ask the fonts for a row's height) before taking the fonts to lay it out. Drop caps with line spacing hung: `a_new_novel_begins_on_book_pages_at_chapter_one_and_a_journal_at_today` | `dropcap.rs::drop_cap` |
 | Justified rows are lined up by their first and last letters: whitespace in front goes out to the left, a tab or space at a paragraph's end gives the caret no room | `justified_edges` moves the glyphs (and their quads) back: the whitespace in front keeps its room, a stretched row still ends at the margin, the last row is as wide as all its chars. Underlines and highlights of such a row are not moved. `justified_text_keeps_a_tab_before_it_and_after_it` | `layout.rs::justified_edges` |
 | Tab moves egui's keyboard focus to the next widget, even when the page took the key | The editor cancels the move when it types a tab (`move_focus(FocusDirection::None)`); the caret is hidden while a widget has the keyboard. `a_tab_typed_beside_a_drop_cap_moves_the_caret_at_once` | `editor.rs` (keys) |
+| `Window::current_pos` is undone for a window moved by its title bar (its place before `Area::begin` is put back) | Give the window a new id to put it back where it starts (`scratchpad_id`). `the_page_bar_docks_on_the_side_its_grip_is_let_go_at_and_the_pages_keep_clear_of_it` | `scratchpad.rs` |
 | `set_fonts` takes effect the next frame; a family named before then panics | `FontBook::ensure` in mid-frame with `immediate: false`, and draw with `family_for` (the usual font until it is there). `fonts::LOADED` is one for the process, so tests running alongside share it: a test that loads a font for the first time is the only one to | `fonts.rs`, `start.rs::welcome_page` |
 
 Re-check every one after upgrading egui.
@@ -553,7 +555,8 @@ scratchpad's text is the document's (`Doc::scratchpad`, saved, R9); whether it s
   repaints about 30 times a second while it moves. Guarded by
   `the_file_name_is_always_in_the_toolbar_and_runs_past_when_there_is_little_room`.
 - **Nothing in a dock is drawn over anything else or past the dock's edge, at any window width.**
-  The page bar lays out from the right (Scratchpad, Fit, the zoom, New page) and, as it gets
+  The page bar lying at the bottom keeps its grip's room at its left end (`GRIP_ROOM`) and lays
+  out from the right (Scratchpad, Fit, the zoom, New page) and, as it gets
   shorter, drops the page count, shrinks New page to "+", drops the track, the zoom, Scratchpad,
   "+" and Fit, the track taking whatever room is left (guarded too by
   `the_page_bar_leaves_no_empty_room_left_of_its_buttons`); the sums in `scrollbar` must match the
@@ -786,7 +789,7 @@ must keep working: writers do it. A version (the whole `.caprice` file) is kept 
   use the wall clock, or `Keeper::clock` in tests. Nothing waits on a frame: while saving or keeping
   is due, `keep_safe` asks for one.
 - **Tests never write behind your back**: `Harness::new` turns autosave off and sets no folder (nor
-  one for the stories last opened, R27); the tests about it turn them on with a folder of their own (`test_dir`).
+  one for the stories last opened, R27, the theme, R29, or the page bar's side, R31); the tests about it turn them on with a folder of their own (`test_dir`).
 - Tests: `a_story_with_a_file_saves_itself_half_a_minute_after_a_change`,
   `closing_a_story_with_a_file_asks_whether_to_keep_the_changes_already_saved`,
   `closing_can_drop_the_changes_since_saving_and_they_stay_in_the_versions`,
@@ -1199,6 +1202,41 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   `going_on_writing_while_a_title_is_brought_sets_it_down_at_once`,
   `print_shows_neither_the_garden_the_houses_the_ships_nor_what_brings_a_title`.
 
+### R31 — The page bar docks at the left, the bottom or the right; the pages keep clear of it
+
+The page bar has a grip at its start ("Move the page bar"): let go in the left quarter of the
+window, the bar stands down the left; in the right quarter, down the right; anywhere between, it
+lies along the bottom again (`pagebar::Side::at`). Standing, it holds the same tools made to fit
+its width (`standing_bar`): the grip and the page count ("3/7") at the top, the track running down,
+then "+", the zoom, Fit and the Scratchpad as an icon (`ui::pad_button`, named "Scratchpad").
+
+- **Where the bar is decides where everything beside it goes, through two functions only:**
+  `App::page_bar_rect` (the dock) and `App::view_area` (the room for the pages). The fitted page,
+  panning and swiping (`view.rs`), the status message (`update_title_and_toast`), the search bar,
+  the scratchpad's first place and the Review and What next windows (`review::left_dock`) all ask
+  them. Anything new placed beside the pages or near an edge of the window asks them too, never
+  `RESERVED` or `dock_rect(area, false)` alone, or it lies under a standing bar. The room at the
+  bottom stays the same wherever the bar is, so docking never resizes the page up and down, and
+  the status message shows there beside a standing bar.
+- **The track is one for both ways** (`page_track`, lying or standing); `App::last_track` holds
+  where the thumb's centre is on the first page and on the last, as points, so tests drag it the
+  same way either way. A new thing in the bar needs a place in both layouts: the sums in
+  `scrollbar`, and the room checks in `standing_bar`.
+- **Docking moves what lay where the bar now is.** A page not fitted keeps its place in the room for
+  the pages (its origin moves with `view_area`'s centre); the scratchpad, if it lies over a standing
+  bar when the bar docks or when it opens, goes back to where it starts. That is done with a new
+  window id (`scratchpad_id`), since egui undoes `Window::current_pos` for a window moved by its
+  title bar (R11).
+- **The side is the writer's, not the story's**: it is kept in the data folder (`page_bar.json`,
+  a plain `"left"`, `"bottom"` or `"right"`, beside `theme.json`), never in `.caprice` files.
+  `Harness` keeps it nowhere (`PageBar::kept_in(None)`); the test about it uses a folder of its own.
+- Tests: `the_page_bar_docks_on_the_side_its_grip_is_let_go_at_and_the_pages_keep_clear_of_it`
+  (docking left, right and back; every tool inside the standing bar and apart; the page, the
+  message, the scratchpad and the left windows clear of it),
+  `standing_down_a_side_the_page_bar_turns_the_pages_with_its_thumb`,
+  `the_side_the_page_bar_is_docked_to_is_kept_for_next_time`; lying, the bar is still checked at
+  every width by `at_any_width_the_docks_settle_and_hold_their_tools_apart` (the grip included).
+
 ---
 
 ## 5. Checklists for common changes
@@ -1235,11 +1273,12 @@ either row. The order of `GROUPS` is the order they go into "⋯", the last firs
 
 **A new tool in a dock:** in the toolbar, inside a group in `tool_group`, nothing in it depending on
 where the group is (R: the toolbar's groups); in the page bar, room in the sums in `scrollbar` and a
-place in the order things go. `at_any_width_the_docks_settle_and_hold_their_tools_apart` then checks
+place in the order things go, and a place in the bar standing down a side (`standing_bar`, R31). `at_any_width_the_docks_settle_and_hold_their_tools_apart` then checks
 it at every width.
 
 **A new window over the pages:** a toggle in the page bar or a menu, not the toolbar (R16); its
-scrolling must not move the pages (R16); its stored text in `Doc` and `DocFile` (R9).
+scrolling must not move the pages (R16); its stored text in `Doc` and `DocFile` (R9); its first
+place clear of the page bar on whichever side it is docked (`view_area`, R31).
 
 **Something new sent with a scene** (like the cast): build it in `scene_prompt` from the subject
 only (R13, R17), check it in `Backdrop::asked` in a test.
@@ -1403,5 +1442,10 @@ when the writer goes on; nothing moved in the layout, nothing in print or the fi
   per chapter, like the city's floors, so nothing new is saved (R9, R30); a ship has a fixed number
   of parts, so a long chapter's ship is simply whole. Finished ships stay in the bay for good,
   whatever happens to their chapters, as plants and floors do.
+- **2026-11-27 — The page bar docks at the left, the bottom or the right.** Asked for: a grip to
+  move it to either side. Where it is docked is kept for the app, like the theme, not in the story:
+  it is how the writer likes the desk, not part of what they wrote (R31). Standing, the bar keeps
+  every tool, made smaller, rather than putting some away; the room at the bottom stays, so the
+  page is not resized up and down by docking.
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.

@@ -145,7 +145,7 @@ impl App {
         egui::Window::new("What next")
             .id(Id::new("ideas"))
             .open(&mut open)
-            .default_rect(left_dock(ctx, true))
+            .default_rect(left_dock(ctx, true, self.bar.side))
             .resizable(true)
             .collapsible(false)
             .show(ctx, |ui| {
