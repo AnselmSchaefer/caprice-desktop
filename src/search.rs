@@ -218,8 +218,10 @@ impl App {
         let ctx = ui.ctx().clone();
         let dock_w = (area.width() - 48.0).min(crate::ui::DOCK_MAX_W);
         let width = 430.0_f32.min(dock_w);
+        // Under the toolbar's right end, or beside the page bar standing down the right.
+        let right = (area.center().x + dock_w / 2.0).min(self.view_area(area).right() - 10.0);
         let rect = Rect::from_min_size(
-            pos2(area.center().x + dock_w / 2.0 - width, self.tools_bottom.max(area.top() + DOCK_GAP + DOCK_H) + 8.0),
+            pos2(right - width, self.tools_bottom.max(area.top() + DOCK_GAP + DOCK_H) + 8.0),
             vec2(width, ROW_H + if self.search.more { 2.0 * MORE_H } else { 0.0 }),
         );
         let p = ui.painter();

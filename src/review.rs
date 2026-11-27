@@ -113,8 +113,10 @@ fn instruction() -> &'static str {
 }
 
 /// Where a window docked on the left goes: the review above, the ideas below (`lower`).
-pub fn left_dock(ctx: &egui::Context, lower: bool) -> Rect {
+pub fn left_dock(ctx: &egui::Context, lower: bool, bar: crate::pagebar::Side) -> Rect {
     let screen = ctx.content_rect();
+    // Clear of the page bar when it stands down the left.
+    let screen = if bar == crate::pagebar::Side::Left { screen.with_min_x(screen.left() + crate::ui::RESERVED) } else { screen };
     let tall = (screen.height() - 160.0).clamp(240.0, 720.0);
     let h = (tall - 16.0) / 2.0;
     let top = screen.top() + 70.0 + if lower { h + 16.0 } else { 0.0 };
@@ -202,7 +204,7 @@ impl App {
         egui::Window::new("Review")
             .id(Id::new("review"))
             .open(&mut open)
-            .default_rect(left_dock(ctx, false))
+            .default_rect(left_dock(ctx, false, self.bar.side))
             .resizable(true)
             .collapsible(false)
             .show(ctx, |ui| {
