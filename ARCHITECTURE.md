@@ -67,7 +67,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `contents.rs` | `Doc::chapters`, splitting the contents over pages, laying out one page of them, migrating the old contents char |
 | `editor.rs` | Caret, selection, typing, deleting, clipboard, keys, mouse, formatting commands, `set_setup`, `turn_to`, the editable page surface |
 | `main.rs` | `App` state, `main()`, the frame loop, page position animation, `go_to_page`, the app-level tests and their `Harness` |
-| `view.rs` | Camera: fit, zoom, panning, two-finger swipe through pages |
+| `view.rs` | Camera: fit, zoom (down to half the fit, R32), panning, two-finger swipe through pages |
 | `render.rs` | Paperstack look: paper, piles, static pages, sliding pages |
 | `book.rs` | Book look: pages turning on their left edge |
 | `notes.rs` | Post-its: placement, pads, drawing, editing |
@@ -1237,6 +1237,32 @@ then "+", the zoom, Fit and the Scratchpad as an icon (`ui::pad_button`, named "
   `the_side_the_page_bar_is_docked_to_is_kept_for_next_time`; lying, the bar is still checked at
   every width by `at_any_width_the_docks_settle_and_hold_their_tools_apart` (the grip included).
 
+### R32 — Zooming out stops at half the fitting zoom, and a growing window lifts it
+
+The fitting zoom (`fit` in `App::page_rect`) is worked out every frame from `view_area` (R31) and
+the page size. Zooming out (pinch, Ctrl+scroll, Ctrl/Cmd + `-`) stops at the floor
+`(fit * 0.5).max(MIN_ZOOM)`: smaller, the page is only a stamp in the window. Zooming in stops at
+`MAX_ZOOM`.
+
+- **The fit stops a zoom passing through it, but never holds one starting there.** A zoom snaps to
+  `fit` only when it crosses it (from below to above or back) or lands within `1e-3` of it, and
+  only if it did not start at `fit`. Every story opens fitted, and a slow pinch or smooth
+  Ctrl+scroll moves the zoom by less than a hundredth per frame: snapping whenever the new zoom
+  was near the fit held it there and no zooming was possible at all. A single big step through
+  the fit (Ctrl+=, a fast pinch) stops at it; the next one goes on. Guarded by
+  `a_slow_pinch_leaves_the_fitting_zoom_and_stops_at_it_on_the_way_back` and
+  `zooming_out_stops_at_half_the_fitting_zoom`.
+- **The floor follows the window.** It is worked out before any zooming in the frame, so when the
+  window grows (or the page bar docks and the room changes) while the writer is zoomed out below
+  the new floor, the zoom is lifted up to it around the view's centre, like a Ctrl+- in reverse.
+  A fitted page (`App::fit`) follows the window anyway and is left to that, also while gliding.
+- Anything new that sets `App::zoom` itself (a new zoom control, a zoom kept somewhere) keeps to
+  `floor..=MAX_ZOOM`, or the next frame lifts it.
+- Tests: `zooming_out_stops_at_half_the_fitting_zoom` (keys and pinch stop at the floor, zooming in
+  still reaches `MAX_ZOOM`), `a_window_grown_while_zoomed_out_lifts_the_zoom_to_its_new_floor`
+  (lifted to the wider window's floor, scaled around the view's centre, still not fitted), and
+  `zooming_back_to_the_fitting_size_leaves_the_page_where_it_is` for the stop at the fit.
+
 ---
 
 ## 5. Checklists for common changes
@@ -1447,5 +1473,9 @@ when the writer goes on; nothing moved in the layout, nothing in print or the fi
   it is how the writer likes the desk, not part of what they wrote (R31). Standing, the bar keeps
   every tool, made smaller, rather than putting some away; the room at the bottom stays, so the
   page is not resized up and down by docking.
+- **2026-11-27 — Zooming out stops at half the fitting zoom.** Asked for: zooming out used to go
+  down to `MIN_ZOOM` whatever the window. Half the fit keeps the page readable as a page in any
+  window; `MIN_ZOOM` stays as the least for tiny windows. The floor moves with the window, so a
+  grown window lifts a zoom left below it rather than keeping a page smaller than intended (R32).
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.

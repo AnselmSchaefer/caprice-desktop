@@ -2021,6 +2021,94 @@ mod tests {
         assert!((h.app.origin - fit_origin).length() < 0.01 && h.app.fit && !h.app.fit_settling);
     }
 
+    /// Ctrl+0 and waiting until the page has settled: the fitting zoom at this window size.
+    fn fitting_zoom(h: &mut Harness) -> f32 {
+        h.frames(1, vec![egui::Event::Key { key: Key::Num0, physical_key: Some(Key::Num0), pressed: true, repeat: false, modifiers: Modifiers::COMMAND }], Modifiers::COMMAND);
+        h.frames(90, vec![], Modifiers::NONE);
+        assert!(h.app.fit && !h.app.fit_settling);
+        h.app.zoom
+    }
+
+    fn zoom_out_by_keys(h: &mut Harness, times: usize) {
+        let minus = egui::Event::Key { key: Key::Minus, physical_key: Some(Key::Minus), pressed: true, repeat: false, modifiers: Modifiers::COMMAND };
+        for _ in 0..times {
+            h.frames(1, vec![minus.clone()], Modifiers::COMMAND);
+        }
+        h.frames(2, vec![], Modifiers::NONE);
+    }
+
+    #[test]
+    fn zooming_out_stops_at_half_the_fitting_zoom() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        let fit = fitting_zoom(&mut h);
+        let floor = (fit * 0.5).max(view::MIN_ZOOM);
+        assert!(floor > view::MIN_ZOOM, "the window is big enough for the floor to be above the least zoom ({fit})");
+        zoom_out_by_keys(&mut h, 30);
+        assert!((h.app.zoom - floor).abs() < 1e-4, "Ctrl+- stops at half the fit: {} vs {floor}", h.app.zoom);
+        // Pinching further out does not go below it either.
+        h.frames(1, vec![egui::Event::Zoom(0.5)], Modifiers::NONE);
+        assert!((h.app.zoom - floor).abs() < 1e-4, "a pinch stops there too: {}", h.app.zoom);
+        // Zooming in stops at the fitting size on the way through, then goes up to the most.
+        h.frames(1, vec![egui::Event::Zoom(100.0)], Modifiers::NONE);
+        assert_eq!(h.app.zoom, fit, "passing the fit stops there");
+        h.frames(1, vec![egui::Event::Zoom(100.0)], Modifiers::NONE);
+        assert_eq!(h.app.zoom, view::MAX_ZOOM);
+    }
+
+    #[test]
+    fn a_slow_pinch_leaves_the_fitting_zoom_and_stops_at_it_on_the_way_back() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        let fit = fitting_zoom(&mut h);
+        let floor = (fit * 0.5).max(view::MIN_ZOOM);
+        let pinch = |h: &mut Harness, z: f32| h.frames(1, vec![egui::Event::Zoom(z)], Modifiers::NONE);
+        // Each frame of a slow pinch moves the zoom by less than a hundredth: it still leaves the fit.
+        pinch(&mut h, 0.99);
+        assert!(h.app.zoom < fit && !h.app.fit, "one small step out leaves the fit: {} vs {fit}", h.app.zoom);
+        for _ in 0..200 {
+            pinch(&mut h, 0.99);
+        }
+        assert!((h.app.zoom - floor).abs() < 1e-4, "a slow pinch goes down to the floor and stops: {} vs {floor}", h.app.zoom);
+        // Pinching slowly back in stops at the fitting size on the way through.
+        let mut stopped = false;
+        for _ in 0..200 {
+            pinch(&mut h, 1.01);
+            if h.app.zoom >= fit {
+                stopped = h.app.zoom == fit;
+                break;
+            }
+        }
+        assert!(stopped, "crossing back stops exactly at the fit: {} vs {fit}", h.app.zoom);
+        // And from there the next small step goes on in.
+        pinch(&mut h, 1.01);
+        assert!(h.app.zoom > fit, "the fit does not hold a slow pinch: {} vs {fit}", h.app.zoom);
+    }
+
+    #[test]
+    fn a_window_grown_while_zoomed_out_lifts_the_zoom_to_its_new_floor() {
+        let mut h = Harness::new();
+        h.width = 600.0;
+        h.frames(3, vec![], Modifiers::NONE);
+        let narrow = fitting_zoom(&mut h);
+        zoom_out_by_keys(&mut h, 30);
+        let low = h.app.zoom;
+        assert!((low - (narrow * 0.5).max(view::MIN_ZOOM)).abs() < 1e-4 && !h.app.fit);
+        let page = |h: &Harness| egui::Rect::from_min_size(h.app.origin, h.app.doc.setup.size() * h.app.zoom);
+        let before = page(&h).center();
+
+        h.width = 1240.0;
+        h.frames(3, vec![], Modifiers::NONE);
+        let floor = (fitting_zoom(&mut Harness::new()) * 0.5).max(view::MIN_ZOOM);
+        assert!(floor > low + 0.02, "the wider window has a higher floor ({low} → {floor})");
+        assert!((h.app.zoom - floor).abs() < 1e-4, "the zoom was lifted to the new floor: {} vs {floor}", h.app.zoom);
+        assert!(!h.app.fit, "and the page is still not fitted");
+        // Lifted around the middle of the view: the page's centre moved away from it, not to a corner.
+        let view = h.app.view_area(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1240.0, 900.0)));
+        let (old, new) = (before - view.center(), page(&h).center() - view.center());
+        assert!((new - old * (floor / low)).length() < 1.0, "scaled around the view centre: {old:?} → {new:?}");
+    }
+
     #[test]
     fn the_cross_on_a_post_it_deletes_it() {
         let mut h = Harness::new();
