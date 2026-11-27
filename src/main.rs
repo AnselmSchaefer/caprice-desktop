@@ -613,6 +613,12 @@ impl App {
         let base = self.pos.floor() as usize;
         let t = self.pos - base as f32;
         self.animate_held(ui);
+        // While the sheet chosen on the welcome flies to it, the page is not drawn: the sheet
+        // becomes the page. It still takes typing and clicks, only unseen.
+        let opacity = ui.opacity();
+        if self.start.sheet_in_air(ctx.input(|i| i.time)) {
+            ui.set_opacity(0.0);
+        }
 
         if let Some((from, to, s, held)) = self.batch {
             // Pages let go of by the scrollbar, moving together.
@@ -681,6 +687,7 @@ impl App {
             let ahead = self.last() - base - 1;
             self.slide_page(ui, page_rect, base, t, back, ahead, &|| self.static_page(ui, next, base + 1));
         }
+        ui.set_opacity(opacity);
 
         self.pan_with_ctrl(ui, area);
         self.update_title_and_toast(ui, area);
@@ -1249,6 +1256,86 @@ mod tests {
         assert!((from, to) == (6, 4) && near(held, -1.5), "{:?}", h.app.batch);
         h.frames(60, vec![], Modifiers::NONE);
         assert_eq!((h.app.batch, h.app.held, h.app.pos), (None, 0.0, 4.0));
+    }
+
+    /// Where the scrollbar's thumb was last painted: its middle along the lying track.
+    fn painted_thumb(h: &Harness) -> f32 {
+        let (first, _) = h.app.last_track;
+        let thumbs: Vec<_> = h.painted.iter().filter_map(|cs| {
+            let egui::Shape::Rect(r) = &cs.shape else { return None };
+            let fill = r.fill == theme::pal().accent || r.fill == theme::pal().thumb;
+            (fill && r.rect.height() == 16.0 && (r.rect.center().y - first.y).abs() < 1.0).then_some(r.rect.center().x)
+        }).collect();
+        assert_eq!(thumbs.len(), 1, "one thumb");
+        thumbs[0]
+    }
+
+    #[test]
+    fn letting_go_of_the_scrollbar_leaves_the_thumb_where_the_pages_are_going() {
+        let mut h = Harness::new();
+        h.app.appearance = Appearance::Paperstack;
+        h.frames(3, vec![], Modifiers::NONE);
+        for _ in 0..6 {
+            h.type_text("page");
+            h.key(Key::Enter, Modifiers::COMMAND);
+        }
+        h.frames(120, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        h.app.go_to_page(&ctx, 1);
+        h.frames(60, vec![], Modifiers::NONE);
+        let (first, last) = h.app.last_track;
+        let at = |page: f32| first + (last - first) * page / 6.0;
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        // The thumb is dragged along in small steps, as a hand does, and let go of on page 5.
+        h.frames(1, vec![egui::Event::PointerMoved(at(1.0)), button(at(1.0), true)], Modifiers::NONE);
+        for k in 1..=20 {
+            h.frames(1, vec![egui::Event::PointerMoved(at(1.0 + 4.0 * k as f32 / 20.0))], Modifiers::NONE);
+        }
+        assert!((painted_thumb(&h) - at(5.0).x).abs() < 1.0, "the thumb follows the drag");
+        h.frames(1, vec![button(at(5.0), false)], Modifiers::NONE);
+        assert_eq!(h.app.batch.map(|b| (b.0, b.1)), Some((1, 5)), "the pages are on their way");
+        // On the frame it is let go of, and after, it stays there rather than going back to page 1.
+        for _ in 0..40 {
+            assert!((painted_thumb(&h) - at(5.0).x).abs() < 1.0, "{} not at {}", painted_thumb(&h), at(5.0).x);
+            h.frames(1, vec![], Modifiers::NONE);
+        }
+    }
+
+    #[test]
+    fn pages_held_out_close_together_do_not_pile_their_shadows_up_beside_them() {
+        let mut h = Harness::new();
+        h.app.appearance = Appearance::Paperstack;
+        h.frames(3, vec![], Modifiers::NONE);
+        for _ in 0..40 {
+            h.key(Key::Enter, Modifiers::COMMAND);
+        }
+        h.frames(60, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        h.app.go_to_page(&ctx, 0);
+        for _ in 0..100 {
+            h.frames(10, vec![], Modifiers::NONE);
+        }
+        assert_eq!((h.app.target, h.app.pos), (0, 0.0));
+        let shadows = |h: &Harness| h.painted.iter().filter(|cs| {
+            matches!(&cs.shape, egui::Shape::Rect(r) if r.fill == egui::Color32::from_black_alpha(14))
+        }).count();
+        let alone = shadows(&h);
+        assert!(alone > 0, "the page casts a shadow");
+
+        // Thirty pages held out, all but the first few a hair apart over each other.
+        let (first, last) = h.app.last_track;
+        let at = |page: f32| first + (last - first) * page / 40.0;
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        h.frames(1, vec![egui::Event::PointerMoved(at(0.0)), button(at(0.0), true)], Modifiers::NONE);
+        for k in 1..=30 {
+            h.frames(1, vec![egui::Event::PointerMoved(at(k as f32))], Modifiers::NONE);
+        }
+        h.frames(120, vec![], Modifiers::NONE);
+        assert!(h.app.held > 29.0, "{}", h.app.held);
+        // The sheets lying under the one above draw their paper but add no shadow of their own.
+        let held = shadows(&h);
+        assert!(held <= 3 * alone, "{held} shadow layers for {alone} of one page");
+        h.frames(1, vec![button(at(30.0), false)], Modifiers::NONE);
     }
 
     #[test]
@@ -4910,8 +4997,21 @@ mod tests {
         assert!(h.painted_texts().contains("BEGIN SOMETHING NEW"), "the welcome is still fading");
         h.type_text("Rain");
         assert_eq!(h.text(), "Rain", "written in at once");
+        // In the air, the page under it is not drawn, and no block of desk is laid over it either:
+        // the desk shows through as it is, shaded or with its pictures.
+        h.frames(10, vec![], Modifiers::NONE);
+        assert!(h.app.start.sheet_in_air(h.time));
+        let screen = h.ctx.content_rect();
+        let blocks = h.painted.iter().filter(|cs| match &cs.shape {
+            egui::Shape::Rect(r) => r.fill == theme::pal().desk && !r.rect.contains_rect(screen.shrink(50.0)),
+            _ => false,
+        }).count();
+        assert_eq!(blocks, 0, "no flat desk over the page");
+        let page = h.painted.iter().any(|cs| matches!(&cs.shape, egui::Shape::Rect(r) if r.rect == h.app.last_page_rect));
+        assert!(!page && !h.painted_texts().contains("Rain"), "the page is not drawn under the sheet");
         h.frames((start::FLIGHT * 60.0) as usize + 2, vec![], Modifiers::NONE);
         assert!(h.app.start.flight.is_none(), "landed");
+        assert!(h.painted_texts().contains("Rain"), "the page is there");
         assert!(!h.painted_texts().contains("BEGIN SOMETHING NEW"), "the welcome is gone");
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -6215,7 +6315,49 @@ mod tests {
         h.app.replace_range(&ctx, two, end, "");
         h.frames(10, vec![], Modifiers::NONE);
         assert_eq!(h.app.doc.chapters(false).len(), 1);
-        assert_eq!(h.app.eggs.plants.iter().map(|p| p.1).collect::<Vec<_>>(), [false, true], "still two plants; the second flowered");
+        assert_eq!(h.app.eggs.plants.iter().map(|p| p.1).collect::<Vec<_>>(), [true, false], "still two plants; the first kept its flower");
+    }
+
+    #[test]
+    fn every_plant_in_the_magic_garden_grows_above_the_bottom_page_bar() {
+        let mut h = Harness::new();
+        in_the_garden(&mut h, 0.0);
+        chapter_one(&mut h);
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text("A short first chapter.");
+        h.frames(200, vec![], Modifiers::NONE);
+        let area = h.ctx.content_rect();
+        let bar_top = h.app.page_bar_rect(area).top();
+        assert_eq!(h.app.bar.side, pagebar::Side::Bottom);
+        assert_eq!(h.app.eggs.plants.len(), 1);
+        assert!(h.app.eggs.plants[0].0.top() < bar_top, "plant top {} must rise above the page bar at {bar_top}", h.app.eggs.plants[0].0.top());
+    }
+
+    #[test]
+    fn taking_a_chapter_title_away_leaves_every_ship_where_it_is() {
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::Sea, 0.0);
+        chapter_one(&mut h);
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text("At sea.\n");
+        let two = h.app.caret;
+        h.type_text("Chapter Two");
+        h.click_widget("Chapter");
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text("Next harbour.");
+        h.frames(300, vec![], Modifiers::NONE);
+        let before: Vec<(usize, bool)> = h.app.eggs.ships.iter().map(|s| (s.0, s.3)).collect();
+        assert!(before.contains(&(0, true)) && before.contains(&(1, false)), "ship 0 afloat in the bay, ship 1 in the yard: {before:?}");
+
+        // Removing the second chapter's title leaves ship 0 in the bay and ship 1 in the yard.
+        let ctx = h.ctx.clone();
+        let end = h.app.doc.total_chars() - 1;
+        h.app.replace_range(&ctx, two, end, "");
+        h.frames(60, vec![], Modifiers::NONE);
+        assert_eq!(h.app.doc.chapters(false).len(), 1);
+        let after: Vec<(usize, bool)> = h.app.eggs.ships.iter().map(|s| (s.0, s.3)).collect();
+        assert!(after.contains(&(0, true)) && after.contains(&(1, false)), "ships stayed put: {after:?}");
+        assert!(h.app.eggs.launch.is_none(), "nothing launched backwards");
     }
 
     #[test]

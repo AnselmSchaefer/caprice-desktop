@@ -25,6 +25,8 @@ use crate::theme::{self, INK, PAPER, pal};
 const REMEMBER: usize = 8;
 /// How long (seconds) the sheet chosen takes to fly to the desk.
 pub const FLIGHT: f64 = 1.1;
+/// The part of the flight after which the sheet chosen lies on the page, fading into it.
+const LAND: f32 = 0.8;
 /// The widest the page's column grows, and the room between the cards.
 const COLUMN: f32 = 940.0;
 const GAP: f32 = 18.0;
@@ -401,6 +403,14 @@ impl Start {
         }
     }
 
+    /// Whether a sheet chosen is still in the air at `now` (frame time). Until it lands, `frame`
+    /// draws no page under it, so the sheet becomes the page, not a second one; nothing is drawn in
+    /// the page's place either, so the desk and its pictures show through as they are. Landed, it
+    /// lies just over the page, so it fades white on white (fading both went grey).
+    pub fn sheet_in_air(&self, now: f64) -> bool {
+        self.flight.as_ref().is_some_and(|f| f.from.is_some() && now - f.at < FLIGHT * f64::from(LAND))
+    }
+
     /// The welcome is going: it fades from over the desk from `at` (frame time).
     pub fn leave(&mut self, at: f64) {
         if self.open {
@@ -641,19 +651,13 @@ impl App {
         // First the welcome fades, leaving the sheet chosen; it flies on alone and lands on the page.
         let flying = from.is_some();
         let gone = if flying { 0.4 } else { 0.7 };
-        let land = ((s - 0.8) / 0.2).clamp(0.0, 1.0);
-        if flying && land == 0.0 {
-            // Until it lands, the page under it is desk: the sheet becomes the page, not a second one.
-            // Landed, it lies just over the page, so it fades white on white (fading both went grey).
-            let cover = self.last_page_rect.expand2(vec2(80.0, 30.0));
-            ui.painter().rect_filled(cover, 0.0, pal().desk);
-        }
+        let land = ((s - LAND) / (1.0 - LAND)).clamp(0.0, 1.0);
         let layer = LayerId::new(Order::Foreground, Id::new("welcome_leaving"));
         let mut over = ui.new_child(UiBuilder::new().layer_id(layer).max_rect(screen));
         over.set_opacity(1.0 - ease((s / gone).min(1.0)));
         self.welcome_page(&mut over, false);
         if let Some((rect, sheet)) = from {
-            let e = ease((s / 0.8).min(1.0));
+            let e = ease((s / LAND).min(1.0));
             let to = self.last_page_rect;
             let at = Rect::from_min_max(rect.min.lerp(to.min, e), rect.max.lerp(to.max, e));
             // Paper over paper at the end: it fades into the page itself, which lies just there.
