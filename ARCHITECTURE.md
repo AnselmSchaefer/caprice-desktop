@@ -560,7 +560,10 @@ scratchpad's text is the document's (`Doc::scratchpad`, saved, R9); whether it s
   shorter, drops the page count, shrinks New page to "+", drops the track, the zoom, Scratchpad,
   "+" and Fit, the track taking whatever room is left (guarded too by
   `the_page_bar_leaves_no_empty_room_left_of_its_buttons`); the sums in `scrollbar` must match the
-  widths drawn. The toolbar drops "⋯" too when there is no room for it. `ui::MIN_WINDOW` keeps a
+  widths drawn. On the frame the scrollbar thumb is released in Paperstack, `page_track` recomputes
+  the thumb's drawn position after letting go moves the pages (`letting_go_of_the_scrollbar_leaves_the_thumb_where_the_pages_are_going`),
+  and sheets held out almost under the sheet above skip their own drop-shadow so dense stacks never
+  turn black (`pages_held_out_close_together_do_not_pile_their_shadows_up_beside_them`). The toolbar drops "⋯" too when there is no room for it. `ui::MIN_WINDOW` keeps a
   floating window wide enough for the usual buttons, but a tiling window manager ignores it, so
   the docks must give way at any width. Something new in either dock needs room in these sums and
   a place in the order things go. (Buttons used to slide out past the bar's left end, and
@@ -944,8 +947,10 @@ file dialog, or a story that cannot be read, leaves the page up.
 - **Leaving it is a flight, not a cut** (`Start::flight`, `welcome_leaving`, drawn last in `frame`
   on a foreground layer): the desk is drawn as usual underneath, the welcome fades from over it,
   and the sheet chosen moves from its place on the page to `App::last_page_rect`, fading out over
-  the page itself at the end. The story takes typing from the first frame of it. Anything that
-  takes the welcome away calls `Start::leave` (or sets a flight), so it never just vanishes.
+  the page itself at the end. While the sheet is still in the air (`Start::sheet_in_air`), `frame`
+  draws no page underneath (nor any flat `pal().desk` patch over it), so the shaded desk and magic
+  themes show through until it lands; the story still takes typing from the first frame. Anything
+  that takes the welcome away calls `Start::leave` (or sets a flight), so it never just vanishes.
 - **A `Kind` is the starting state of a story, not a setting**: its paper, margins, headers and
   footers, drop caps (`Kind::setup`), the look of its text (`Kind::body`: font from the first of
   its fonts offered, size, alignment, spacing) and its first chapter title (`Kind::title`). `begin`
@@ -1059,8 +1064,11 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   called in `frame` right after `page_rect` and before any page is drawn, so the pages hide what is
   behind them, in either look and while turning. A plant a chapter (one for a story without
   chapters), taking turns on the left and right of the page, as tall as its chapter's pages
-  (`height_of`), flowering once the next chapter has begun. The chapters come from `Doc::chapters`
-  and `page_of`, so the garden follows whatever changes them, with nothing to keep in step.
+  (`height_of`), plus the height hidden behind the page bar when it lies along the bottom so even
+  a short chapter's plant rises into sight above it. Every plant except the newest in `Doc::garden`
+  flowers, so taking a chapter title away never strips a flower off a plant that already had one.
+  The chapters come from `Doc::chapters` and `page_of`, so the garden follows whatever changes
+  them, with nothing to keep in step.
 - **It never shrinks, and is kept with the story** (`Doc::garden`, saved as `DocFile::garden`): the
   most pages each plant has had, a plant a chapter in order. `grow_garden` raises it, in every
   theme, whenever the story's version or its number of pages changed, so the Magic Garden shows
@@ -1093,8 +1101,9 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   the ships rocking and the waves drifting; nothing else in the app does.
 - **The sea lies on the desk the same way**, in the Magic Sea only: `draw_sea` is called right after
   `draw_city`. A ship for each chapter, from the same `Doc::garden`, so it needs nothing kept of its
-  own either. The chapter being written (the last of `Doc::chapters`, or the only one) has its ship
-  in the yard on the left of the page, a part for each page its chapter has had, up to `PARTS`
+  own either. The newest ship (the last of `Doc::garden`, not the last of `Doc::chapters`, so
+  removing a chapter title never pulls a launched ship back into the yard) is built in the yard on
+  the left of the page, a part for each page its chapter has had, up to `PARTS`
   (keel and ribs, planks below, planks above, rail and castle, stripe and portholes, main mast,
   its sail, foremast, its sail, bowsprit and jib, topsails, flags); each part comes in sight out of
   a little light (`Eggs::rigged`, `BUILD` seconds a part like a floor). Every other chapter's ship
@@ -1189,6 +1198,8 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   `in_the_magic_garden_a_plant_grows_beside_the_pages_as_the_story_grows`,
   `each_chapter_grows_its_own_plant_and_flowers_once_the_next_begins`,
   `a_chapter_taken_out_keeps_its_plant_and_it_flowers`,
+  `every_plant_in_the_magic_garden_grows_above_the_bottom_page_bar`,
+  `taking_a_chapter_title_away_leaves_every_ship_where_it_is`,
   `the_garden_is_kept_with_the_story_and_does_not_shrink_when_it_is_opened_again_smaller`,
   `dropping_the_changes_since_saving_keeps_the_garden_grown_since`,
   `a_story_begun_is_not_unsaved_for_its_garden`,

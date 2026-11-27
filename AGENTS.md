@@ -17,6 +17,8 @@ behaviour**: its rules (§4) say what depends on what, and which tests guard eac
 - `cargo test` passes, and clippy has no warnings beyond the ones already there (15 today).
 - Behaviour you can see in the app has an app-level test (`Harness` in `main.rs`). A bug fix has a
   test that fails without the fix: check that it does.
+- Test continuous gestures (pinch, scroll, drag, resize) with small per-frame steps rather than
+  single-frame jumps.
 - If a change alters a rule in `ARCHITECTURE.md`, or adds one, update the file in the same commit.
 
 ## Keeping the rules growing
@@ -87,6 +89,6 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
 
 ## Files
 
-- Tracked: `README.md`, `ARCHITECTURE.md`, `CLAUDE.md`.
+- Tracked: `README.md`, `ARCHITECTURE.md`, `AGENTS.md`.
 - Local, untracked planning notes: `TECHNICAL_DESCRIPTION.md` (older, superseded by
   `ARCHITECTURE.md`), `FORK_REQUIREMENTS.md` (when to fork egui), `CHAPTERS_PLAN.md`.

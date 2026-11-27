@@ -10,6 +10,8 @@ use crate::theme::PAPER;
 /// Which way, per sheet, the piles of pages ahead and behind spread out from under the page.
 pub const AHEAD: egui::Vec2 = egui::vec2(1.0, 0.64);
 pub const BEHIND: egui::Vec2 = egui::vec2(-1.0, 0.5);
+/// How far a sheet's shadow reaches beyond its edge (`App::shadow`).
+const SHADOW_REACH: f32 = 15.0;
 /// Colour of the sheets in the pile ahead of the page.
 const AHEAD_FILL: Color32 = Color32::from_rgb(232, 230, 224);
 /// Colour of the sheets in the pile behind the page.
@@ -22,11 +24,16 @@ impl App {
     }
 
     pub fn paper(painter: &egui::Painter, rect: Rect) {
+        Self::shadow(painter, rect);
+        painter.rect_filled(rect, 1.0, PAPER);
+    }
+
+    /// The soft shadow a sheet casts on what lies under it, reaching `SHADOW_REACH` round it.
+    fn shadow(painter: &egui::Painter, rect: Rect) {
         for s in 1..=6u8 {
             let r = rect.expand(f32::from(s) * 2.5);
             painter.rect_filled(r.translate(vec2(0.0, 6.0)), 2.0, Color32::from_black_alpha(14));
         }
-        painter.rect_filled(rect, 1.0, PAPER);
     }
 
     /// Page-point offset between neighbouring sheets for a document of `n` pages. The whole pile
@@ -191,10 +198,10 @@ impl App {
             let s = ease(t / OUT);
             self.stack(ui.painter(), rect, base, ahead);
             under();
-            self.sheet_at(ui, rect, base, clear * s, 0.0, if back { s } else { 0.0 }, true);
+            self.sheet_at(ui, rect, base, clear * s, 0.0, if back { s } else { 0.0 }, true, true);
         } else {
             let s = ease((t - OUT) / (1.0 - OUT));
-            self.sheet_at(ui, rect, base, clear + (pile - clear) * s, s, if back { 1.0 } else { s }, true);
+            self.sheet_at(ui, rect, base, clear + (pile - clear) * s, s, if back { 1.0 } else { s }, true, true);
             self.stack(ui.painter(), rect, base, ahead);
             under();
         }
@@ -319,22 +326,30 @@ impl App {
     }
 
     /// Draw pages lying apart (page, offset from `rect`, how far its post-its have moved over to
-    /// the left), bottom one first. Only those with a good strip left uncovered show their text.
+    /// the left), bottom one first. Only those with a good strip left uncovered show their text,
+    /// and only those lying out beyond the shadow of the one above cast their own: held out a hair
+    /// apart, many sheets' shadows would pile up into a black band beside them.
     fn sheets(&self, ui: &egui::Ui, rect: Rect, sheets: &[(usize, egui::Vec2, f32)], edge: f32) {
         for (m, &(i, offset, left)) in sheets.iter().enumerate() {
-            let text = sheets.get(m + 1).is_none_or(|above| (above.1.x - offset.x).abs() > 20.0);
-            self.sheet_at(ui, rect, i, offset, edge, left, text);
+            let apart = sheets.get(m + 1).map(|above| above.1 - offset);
+            let text = apart.is_none_or(|d| d.x.abs() > 20.0);
+            let shadow = apart.is_none_or(|d| d.x.abs().max(d.y.abs()) >= SHADOW_REACH);
+            self.sheet_at(ui, rect, i, offset, edge, left, text, shadow);
         }
     }
 
     /// Draw page `i` lying at `offset` from `rect`, its edge drawn in by `edge` (0 to 1), and its
     /// post-its moved over from its right edge to its left by `left` (0 to 1). Without `text`
-    /// (covered anyway) just the paper and the post-its.
+    /// (covered anyway) just the paper and the post-its; without `shadow` (lost in the shadow of
+    /// the sheet above) none.
     #[allow(clippy::too_many_arguments)]
-    fn sheet_at(&self, ui: &egui::Ui, rect: Rect, i: usize, offset: egui::Vec2, edge: f32, left: f32, text: bool) {
+    fn sheet_at(&self, ui: &egui::Ui, rect: Rect, i: usize, offset: egui::Vec2, edge: f32, left: f32, text: bool, shadow: bool) {
         let ctx = ui.ctx();
         let sheet = rect.translate(offset);
-        Self::paper(ui.painter(), sheet);
+        if shadow {
+            Self::shadow(ui.painter(), sheet);
+        }
+        ui.painter().rect_filled(sheet, 1.0, PAPER);
         let sc = self.scale_of(sheet);
         if text {
             ui.painter().extend(self.backdrop_shapes(ctx, i, sheet, &|p| p, 1.0, 1.0));
