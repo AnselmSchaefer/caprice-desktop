@@ -6,6 +6,7 @@ use crate::App;
 use crate::pagebar::Side;
 use crate::ui::RESERVED;
 
+/// The least zoom ever, however small the window; zooming out stops at half the fitting zoom above it.
 pub const MIN_ZOOM: f32 = 0.3;
 pub const MAX_ZOOM: f32 = 4.0;
 /// How far two fingers swipe sideways to flip one page, in points.
@@ -106,6 +107,14 @@ impl App {
         let size = self.doc.setup.size();
         // Leave room on both sides for post-its sticking out of the page and the stacks.
         let fit = ((view.height() - 16.0) / size.y).min((view.width() - 48.0) / (size.x + 2.0 * crate::notes::NOTE_OUT)).clamp(MIN_ZOOM, 3.0);
+        // Zooming out stops at half the fitting size: smaller, the page is only a stamp in the window.
+        let floor = (fit * 0.5).max(MIN_ZOOM);
+        if !self.fit && self.zoom < floor {
+            // The window grew while zoomed out: lift the page to the new floor around the middle.
+            let c = view.center();
+            self.origin = c + (self.origin - c) * (floor / self.zoom);
+            self.zoom = floor;
+        }
         let (pinch, scroll, hover) = ctx.input(|i| (i.zoom_delta(), i.smooth_scroll_delta, i.pointer.hover_pos()));
         let keys = ctx.input_mut(|i| {
             let mut z = 1.0;
@@ -143,7 +152,7 @@ impl App {
         let z = pinch * keys;
         if (z - 1.0).abs() > 1e-4 {
             let anchor = hover.filter(|p| view.contains(*p)).unwrap_or(view.center());
-            let mut new = (self.zoom * z).clamp(MIN_ZOOM, MAX_ZOOM);
+            let mut new = (self.zoom * z).clamp(floor, MAX_ZOOM);
             if (new - fit).abs() < 0.02 {
                 new = fit; // stop at the fitting size on the way through
             }
